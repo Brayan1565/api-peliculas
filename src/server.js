@@ -1,141 +1,161 @@
 const express = require('express')
-const app = express()
+const { pool, probarConexion } = require('./db')
 
+const app = express()
 app.use(express.json())
 
-const peliculas = [
-    {
-        id: 1,
-        titulo: 'Project Hail Mary',
-        director: 'Phil Lord y Christopher Miller',
-        anio: 2026,
-        genero: 'Ciencia ficcion, aventura y drama',
-        duracion: 156
-    },
-    {
-        id: 2,
-        titulo: 'La odisea',
-        director: 'Christopher Nolan',
-        anio: 2026,
-        genero: 'Accion, aventura, fantasia y drama',
-        duracion: 172
-    },
-    {
-        id: 3,
-        titulo: 'Avengers: Doomsday',
-        director: 'Anthony Russo y Joe Russo',
-        anio: 2026,
-        genero: 'Accion, aventura, ciencia ficcion y superheroes',
-        duracion: 162   
-    },
-]
-
 //GET
-app.get('/peliculas', (req, res) => {
-    res.json(peliculas)
+app.get('/peliculas', async (req, res) => {
+    try {
+        const [peliculas] = await pool.query('SELECT * FROM peliculas')
+        res.json(peliculas)
+    }
+    catch (error) {
+        console.error(error)
+        res.status(500).json({ mensaje: 'Error al obtener peliculas' })
+    }
 })
 
-app.get('/peliculas/:id', (req, res) => {
-    const id = parseInt(req.params.id)
-    const pelicula = peliculas.find(p => p.id === id)
+app.get('/peliculas/:id', async (req, res) => {
 
-    if(!pelicula) {
-        return res.status(404).json({ mensaje: 'Pelicula no encontrada' })
+    try {
+        const id = parseInt(req.params.id)
+
+        const [filas] = await pool.query('SELECT * FROM peliculas WHERE id = ?', [id])
+
+        if (filas.length === 0) {
+            return res.status(404).json({ mensaje: 'Pelicula no encontrada' })
+        }
+
+        res.json(filas[0])
+    } catch (error) {
+        console.error(error)
+        res.status(500).json({ mensaje: 'Error al obtener la pelicula' })
     }
-
-    res.json(pelicula)
 })
 
 //POST
-app.post('/peliculas', (req, res) => {
-    const {titulo, director, anio, genero, duracion } = req.body
+app.post('/peliculas', async (req, res) => {
+    try {
+        const { titulo, director, anio, genero, duracion } = req.body
 
-    if (!titulo || !anio ) {
-        return res.status(400).json ({ mensaje: 'El titulo y año son obligatorios'})
+        if (!titulo || !anio) {
+            return res.status(400).json({ mensaje: 'El titulo y año son obligatorios' })
+        }
+
+        const [resultado] = await pool.query(
+            'INSERT INTO peliculas (titulo, director, anio, genero, duracion) VALUES (?, ?, ?, ?, ?)',
+            [titulo, director, parseInt(anio), genero, duracion ? parseInt(duracion) : null]
+        )
+
+        res.status(201).json({
+            id: resultado.insertId,
+            titulo,
+            director,
+            anio: parseInt(anio),
+            genero,
+            duracion: duracion ? parseInt(duracion) : null
+        })
+    } catch (error) {
+        console.error(error)
+        res.status(500).json({ mensaje: 'Error al crear la pelicula' })
     }
-
-    const nuevoId = peliculas.length > 0 ? Math.max(...peliculas.map(p => p.id)) + 1 : 1
-     
-    const nuevaPelicula = {
-        id: nuevoId,
-        titulo,
-        director,
-        anio: parseInt(anio),
-        genero,
-        duracion: parseInt(duracion)
-    }
-
-    peliculas.push(nuevaPelicula)
-
-    res.status(201).json(nuevaPelicula)
 })
 
 //PUT
-app.put('/peliculas/:id', (req, res) => {
-    const id = parseInt(req.params.id)
+app.put('/peliculas/:id', async (req, res) => {
+    try {
+        const id = parseInt(req.params.id)
 
-    const index = peliculas.findIndex((p) => p.id === id)
+        const { titulo, director, anio, genero, duracion } = req.body
 
-    if (index === -1) {
-        return res.status(404).json({ mensaje: 'La pelicula que estas intentando actualizar no existe!' })
+        if (!titulo || !director || !anio || !genero || !duracion) {
+            return res.status(400).json({ mensaje: 'Para actualizar se debe enviar el titulo, director, año, genero, duración' })
+        }
+
+        const [resultado] = await pool.query(
+            'UPDATE peliculas SET titulo = ?, director = ?, anio = ?, genero = ?, duracion = ? WHERE id = ?',
+            [titulo, director, parseInt(anio), genero, parseInt(duracion), id]
+        )
+
+        if (resultado.affectedRows === 0) {
+            return res.status(404).json({ mensaje: 'La pelicula que estas intentando actualizar no existe!' })
+        }
+
+        res.json({
+            id,
+            titulo,
+            director,
+            anio: parseInt(anio),
+            genero,
+            duracion: parseInt(duracion)
+        })
+    } catch (error) {
+        console.error(error)
+        res.status(500).json({ mensaje: 'Error al actualizar la pelicula' })
     }
-
-    const { titulo, director, anio, genero, duracion } = req.body
-
-    if (!titulo || !director || !anio || !genero || !duracion) {
-        return res.status(400).json({ mensaje: 'Para actualizar se debe enviar el titulo, director, año, genero, duración'})
-    }
-
-    peliculas[index] = {
-        id,
-        titulo,
-        director,
-        anio: parseInt(anio),
-        genero,
-        duracion: parseInt(duracion)
-    }
-
-    res.json(peliculas[index])
 })
 
 //PATCH
-app.patch('/peliculas/:id', (req, res) => {
-    const id = parseInt(req.params.id)
-    const index = peliculas.findIndex((p) => p.id === id)
+app.patch('/peliculas/:id', async (req, res) => {
+    try {
+        const id = parseInt(req.params.id)
 
-    if (index === -1) {
-        return res.status(404).json({ mensaje: 'La pelicula que estas intentando modificar no existe!' })
+        const [filas] = await pool.query('SELECT * FROM peliculas WHERE id = ?', [id])
+
+        if (filas.length === 0) {
+            return res.status(404).json({ mensaje: 'La pelicula que estas intentando modificar no existe!' })
+        }
+
+        const actual = filas[0]
+        const { titulo, director, anio, genero, duracion } = req.body
+
+        const actualizada = {
+            titulo: titulo !== undefined ? titulo : actual.titulo,
+            director: director !== undefined ? director : actual.director,
+            anio: anio !== undefined ? parseInt(anio) : actual.anio,
+            genero: genero !== undefined ? genero : actual.genero,
+            duracion: duracion !== undefined ? parseInt(duracion) : actual.duracion
+        }
+
+        await pool.query(
+            'UPDATE peliculas SET titulo = ?, director = ?, anio = ?, genero = ?, duracion = ? WHERE id = ?',
+            [actualizada.titulo, actualizada.director, actualizada.anio, actualizada.genero, actualizada.duracion, id]
+        )
+
+        res.json({ id, ...actualizada })
+    } catch (error) {
+        console.error(error)
+        res.status(500).json({ mensaje: 'Error al modificar la pelicula' })
     }
-
-    const { titulo, director, anio, genero, duracion } = req.body
-
-    if (titulo !== undefined) peliculas[index].titulo = titulo
-    if (director !== undefined) peliculas[index].director = director
-    if (anio !== undefined) peliculas[index].anio = parseInt(anio)
-    if (genero !== undefined) peliculas[index].genero = genero
-    if (duracion !== undefined) peliculas[index].duracion = parseInt(duracion)
-
-    res.json(peliculas[index])
 })
 
 //DELETE
-app.delete('/peliculas/:id', (req, res) => {
-    const id = parseInt(req.params.id)
+app.delete('/peliculas/:id', async (req, res) => {
+    try {
+        const id = parseInt(req.params.id)
 
-    const index = peliculas.findIndex((p) => p.id === id)
+        const [filas] = await pool.query('SELECT * FROM peliculas WHERE id = ?', [id])
 
-    if (index === -1) {
-        return res.status(404).json({ mensaje: 'La pelicula que esta intentando eliminar no existe!' })
+        if (filas.length === 0) {
+            return res.status(404).json({ mensaje: 'La pelicula que estas intentando eliminar no existe!' })
+        }
+
+        await pool.query('DELETE FROM peliculas WHERE id = ?', [id])
+
+        res.json({
+            mensaje: 'Pelicula eliminada',
+            pelicula: filas[0]
+        })
+
+    } catch (error) {
+        console.error(error)
+        res.status(500).json({ mensaje: 'Error al eliminar la pelicula' })
     }
-
-    const eliminado = peliculas.splice(index, 1)[0]
-
-    res.json({
-        mensaje: 'Pelicula eliminada',
-        peliculas: eliminado
-    })
 })
+const PORT = process.env.PORT
 
-app.listen(3000, () => {
-    console.log('Servidor corriendo en http://localhost:3000')
+app.listen(PORT, () => {
+    console.log(`Servidor corriendo en http://localhost:${PORT}`)
+    probarConexion()
 })
